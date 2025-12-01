@@ -1,0 +1,1194 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal de Acceso y Verificación de Certificados (Demo Local)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <script>
+        // BASE DE DATOS LOCAL EN MEMORIA
+        const localDB = {
+            users: {
+                "admin@cebrena.edu.pe": { 
+                    password: "administrassword", 
+                    rol: "admin", 
+                    uid: "uid-admin-001" 
+                },
+                "student1@cebrena.edu.pe": { 
+                    password: "studentpassword1", 
+                    rol: "estudiante", 
+                    uid: "uid-est-001" 
+                },
+                "student2@cebrena.edu.pe": { 
+                    password: "studentpassword2", 
+                    rol: "estudiante", 
+                    uid: "uid-est-002" 
+                },
+                "student3@cebrena.edu.pe": { 
+                    password: "studentpassword3", 
+                    rol: "estudiante", 
+                    uid: "uid-est-003" 
+                },
+                "student4@cebrena.edu.pe": { 
+                    password: "studentpassword4", 
+                    rol: "estudiante", 
+                    uid: "uid-est-004" 
+                },
+                "student5@cebrena.edu.pe": { 
+                    password: "studentpassword5", 
+                    rol: "estudiante", 
+                    uid: "uid-est-005" 
+                }
+            },
+
+            profiles: {
+                "uid-admin-001": { 
+                    nombreCompleto: "Administrador Jefe", 
+                    email: "admin@cebrena.edu.pe" 
+                },
+                "uid-est-001": { 
+                    nombreCompleto: "Ana Sofía Gómez López", 
+                    email: "student1@cebrena.edu.pe" 
+                },
+                "uid-est-002": { 
+                    nombreCompleto: "Juan Pablo Rodríguez López", 
+                    email: "student2@cebrena.edu.pe" 
+                },
+                "uid-est-003": { 
+                    nombreCompleto: "María Fernanda Cruz Salazar", 
+                    email: "student3@cebrena.edu.pe" 
+                },
+                "uid-est-004": { 
+                    nombreCompleto: "Luis Alberto Medina Torres", 
+                    email: "student4@cebrena.edu.pe" 
+                },
+                "uid-est-005": { 
+                    nombreCompleto: "Mónica Villavicienzo Hurtado", 
+                    email: "student5@cebrena.edu.pe" 
+                }
+            },
+
+            // Agregar historial de cambios
+            privateCertificates: {},
+            publicCertificates: {},
+            certificateHistory: {} // Para rastrear cambios en certificados
+        };
+
+        // SIMULACIÓN DE AUTENTICACIÓN Y BASE DE DATOS
+        let currentUser = null;
+        let currentView = 'login';
+
+        // Función para iniciar sesión
+        const simulatedLogin = (email, password) => {
+            const user = localDB.users[email];
+            if (user && user.password === password) {
+                const profile = localDB.profiles[user.uid] || {};
+                return {
+                    ...user,
+                    ...profile,
+                    isLoggedIn: true
+                };
+            }
+            return null;
+        };
+
+        // Función para obtener el certificado privado
+        const simulateGetPrivateCert = (uid) => {
+            return localDB.privateCertificates[uid];
+        };
+
+        // Función para obtener el certificado público
+        const simulateGetPublicCert = (code) => {
+            return localDB.publicCertificates[code];
+        };
+
+        // Función para generar un código único
+        const generateUniqueCode = (studentUid) => {
+            const studentCodes = {
+                "uid-est-001": "CEB-ANA-001",
+                "uid-est-002": "CEB-JUAN-002", 
+                "uid-est-003": "CEB-MARIA-003",
+                "uid-est-004": "CEB-LUIS-004",
+                "uid-est-005": "CEB-MONICA-005"
+            };
+
+            if (studentUid && studentCodes[studentUid]) {
+                return studentCodes[studentUid];
+            }
+
+            const prefixes = ["ANA", "JUAN", "MARIA", "LUIS", "MONICA"];
+            const randomPrefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+            const randomNum = Math.random().toString(36).substring(2, 6).toUpperCase();
+            return `CEB-${randomPrefix}-${randomNum}`;
+        };
+
+        // Función para registrar un estudiante
+        const simulateRegisterStudent = (email, password) => {
+            if (localDB.users[email]) {
+                throw new Error("El correo ya está registrado.");
+            }
+
+            const newUid = 'uid-est-' + (Object.keys(localDB.users).length + 1).toString().padStart(3, '0');
+            localDB.users[email] = { 
+                password: password, 
+                rol: "estudiante", 
+                uid: newUid 
+            };
+            
+            localDB.profiles[newUid] = { 
+                nombreCompleto: email.split('@')[0].toUpperCase() + ' (NUEVO)', 
+                email: email 
+            };
+        };
+
+        // FUNCIÓN: Actualizar certificado existente
+        const simulateUpdateCertificate = (uid, updatedCertData) => {
+            if (!localDB.privateCertificates[uid]) {
+                throw new Error("Certificado no encontrado para actualizar.");
+            }
+
+            const currentCert = localDB.privateCertificates[uid];
+            const currentCode = currentCert.codigo;
+            
+            // Registrar en el historial antes de actualizar
+            if (!localDB.certificateHistory[currentCode]) {
+                localDB.certificateHistory[currentCode] = [];
+            }
+            
+            localDB.certificateHistory[currentCode].push({
+                timestamp: new Date().toISOString(),
+                action: 'UPDATE',
+                previousData: { ...currentCert },
+                updatedBy: currentUser.uid
+            });
+
+            // Actualizar certificado privado
+            localDB.privateCertificates[uid] = {
+                ...currentCert,
+                ...updatedCertData,
+                fechaActualizacion: new Date().toISOString().substring(0, 10),
+                actualizadoPor: currentUser.uid
+            };
+
+            // Actualizar certificado público
+            if (localDB.publicCertificates[currentCode]) {
+                localDB.publicCertificates[currentCode] = {
+                    ...localDB.publicCertificates[currentCode],
+                    ...updatedCertData,
+                    fechaActualizacion: new Date().toISOString().substring(0, 10),
+                    estado: "Válido (Actualizado)"
+                };
+            }
+
+            return localDB.privateCertificates[uid];
+        };
+
+        // FUNCIÓN: Eliminar certificado
+        const simulateDeleteCertificate = (uid) => {
+            if (!localDB.privateCertificates[uid]) {
+                throw new Error("Certificado no encontrado para eliminar.");
+            }
+
+            const certToDelete = localDB.privateCertificates[uid];
+            const codeToDelete = certToDelete.codigo;
+
+            // Registrar en el historial antes de eliminar
+            if (!localDB.certificateHistory[codeToDelete]) {
+                localDB.certificateHistory[codeToDelete] = [];
+            }
+            
+            localDB.certificateHistory[codeToDelete].push({
+                timestamp: new Date().toISOString(),
+                action: 'DELETE',
+                deletedData: { ...certToDelete },
+                deletedBy: currentUser.uid
+            });
+
+            // Eliminar de ambas colecciones
+            delete localDB.privateCertificates[uid];
+            delete localDB.publicCertificates[codeToDelete];
+
+            return { deletedUid: uid, deletedCode: codeToDelete };
+        };
+
+        // FUNCIÓN: Obtener historial de certificado
+        const simulateGetCertificateHistory = (code) => {
+            return localDB.certificateHistory[code] || [];
+        };
+
+        const getEl = (id) => document.getElementById(id);
+
+        // Función para mostrar un modal personalizado
+        const showMessage = (title, message, type = 'info', actionCallback = null) => {
+            const modal = getEl('custom-modal');
+            const titleEl = getEl('modal-title');
+            const messageEl = getEl('modal-message');
+            const closeBtn = getEl('modal-close-btn');
+
+            let colorClass = 'text-indigo-700';
+            let buttonText = 'Aceptar';
+            
+            if (type === 'error') { 
+                colorClass = 'text-red-700'; 
+            }
+            if (type === 'success') { 
+                colorClass = 'text-green-700'; 
+                buttonText = actionCallback ? 'Descargar' : 'Aceptar';
+            }
+            if (type === 'warning') { 
+                colorClass = 'text-yellow-700'; 
+            }
+
+            titleEl.textContent = title;
+            titleEl.className = `text-xl font-bold mb-3 ${colorClass}`;
+            messageEl.innerHTML = message; 
+
+            closeBtn.textContent = buttonText;
+
+            // Muestra el modal
+            modal.classList.remove("hidden");
+
+            // Adjunta el manejador al botón de cierre
+            const closeModal = () => {
+                modal.classList.add("hidden");
+                closeBtn.removeEventListener('click', handler);
+            };
+
+            const handler = (e) => {
+                if (actionCallback && type === 'success' && buttonText === 'Descargar') {
+                    actionCallback();
+                }
+                closeModal();
+            };
+
+            closeBtn.addEventListener('click', handler);
+        };
+
+        // Función para mostrar modal de confirmación 
+        const showConfirmationModal = (title, message, confirmCallback, cancelCallback = null) => {
+            const modal = getEl('confirmation-modal');
+            const titleEl = getEl('confirmation-title');
+            const messageEl = getEl('confirmation-message');
+            const confirmBtn = getEl('confirmation-confirm-btn');
+            const cancelBtn = getEl('confirmation-cancel-btn');
+
+            titleEl.textContent = title;
+            messageEl.textContent = message;
+            
+            confirmBtn.textContent = 'Confirmar';
+            cancelBtn.textContent = 'Cancelar';
+
+            // Muestra el modal
+            modal.classList.remove("hidden");
+
+            // Maneja la confirmación
+            const handleConfirm = () => {
+                modal.classList.add("hidden");
+                confirmBtn.removeEventListener('click', handleConfirm);
+                cancelBtn.removeEventListener('click', handleCancel);
+                if (confirmCallback) confirmCallback();
+            };
+
+            // Maneja la cancelación
+            const handleCancel = () => {
+                modal.classList.add("hidden");
+                confirmBtn.removeEventListener('click', handleConfirm);
+                cancelBtn.removeEventListener('click', handleCancel);
+                if (cancelCallback) cancelCallback();
+            };
+
+            confirmBtn.addEventListener('click', handleConfirm);
+            cancelBtn.addEventListener('click', handleCancel);
+        };
+
+        // Función para simular descarga de certificado
+        const simulateDownloadCert = async (certData, studentName) => {
+            const API_BASE = 'http://127.0.0.1:5000';
+            
+            try {
+                const certCode = certData.codigo || certData.code || certData.codigoUnico || "CEB-2025-001";
+                if (!certCode) throw new Error('No se encontró el código del certificado');
+
+                const url = `${API_BASE}/download-certificate?code=${encodeURIComponent(certCode)}`;
+                const resp = await fetch(url, { method: 'GET' });
+
+                if (!resp.ok) {
+                    const text = await resp.text().catch(() => null);
+                    throw new Error(`Error en servidor: ${resp.status} ${resp.statusText} ${text ? '-'+text : ''}`);
+                }
+
+                const blob = await resp.blob();
+                
+                // Obtener filename desde Content-Disposition si existe
+                let filename = `Certificado_${studentName || 'alumno'}.pdf`.replace(/\s+/g, '_');
+                const cd = resp.headers.get('Content-Disposition') || "";
+                const m = cd.match(/filename\*?=(?:UTF-8'')?["']?([^,"']+)/i);
+                
+                if (m && m[1]) filename = decodeURIComponent(m[1].replace(/["']/g, ""));
+
+                // Descargar
+                const objectUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = objectUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(objectUrl);
+
+                showMessage(
+                    "DESCARGA EXITOSA",
+                    `Se ha generado y descargado el archivo: ${filename}`,
+                    'info'
+                );
+            } catch (err) {
+                console.error('Error al descargar certificado:', err);
+                showMessage(
+                    "ERROR",
+                    `No se pudo descargar el certificado: ${err.message}`,
+                    'error'
+                );
+            }
+        };
+
+        // Función principal de renderizado
+        const renderApp = () => {
+            console.log('Current View:', currentView);
+            console.log('Current User:', currentUser);
+
+            const container = getEl('app-container');
+            if (!container) return;
+
+            container.innerHTML = "";
+            let content = "";
+            let title = "";
+
+            switch(currentView) {
+                case 'login':
+                    content = renderLogin();
+                    title = 'Acceso al Sistema';
+                    break;
+                case 'register':
+                    content = renderRegister();
+                    title = 'Registro de Estudiante';
+                    break;
+                case 'mfa_prompt':
+                    content = renderMFA();
+                    title = 'Verificación de Seguridad (MFA)';
+                    break;
+                case 'public_verify':
+                    content = renderPublicVerify();
+                    title = 'Verificación Pública de Certificado';
+                    break;
+                case 'admin_dashboard':
+                    content = renderAdminDashboard();
+                    title = 'Panel de Administrador';
+                    break;
+                case 'student_dashboard':
+                    content = renderStudentDashboard();
+                    title = 'Panel de Estudiante';
+                    break;
+                case 'admin_certificate_management': 
+                    content = renderAdminCertificateManagement();
+                    title = 'Gestión de Certificados';
+                    break;
+                default:
+                    content = renderLogin();
+                    title = 'Acceso al Sistema';
+            }
+
+            // Renderizar la tarjeta principal
+            container.innerHTML = `
+                <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-4xl transition-all duration-300">
+                    <div class="mb-6 border-b pb-3">
+                        <h1 class="text-3xl font-extrabold text-indigo-700 text-center">CENTRO EDUCATIVO BREÑA</h1>
+                        <h2 class="text-xl font-semibold text-gray-600 mt-2 text-center">${title}</h2>
+                    </div>
+                    ${content}
+                </div>
+                
+                <!-- Botón de navegación principal -->
+                ${currentView !== 'public_verify' && currentView !== 'admin_certificate_management' ? 
+                    '<button id="btn-public-verify" class="mt-6 px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors shadow-md">Verificación Pública de Certificados</button>' : 
+                    ''}
+                
+                ${currentView === 'admin_certificate_management' ? 
+                    '<button id="btn-back-admin" class="mt-6 px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors shadow-md">Volver al Panel de Administración</button>' : 
+                    ''}
+                
+                ${currentView === 'public_verify' ? 
+                    '<button id="btn-back-login" class="mt-6 px-4 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition-colors shadow-md">Volver a Acceso</button>' : 
+                    ''}
+            `;
+
+            attachEventListeners();
+        };
+
+        const navigateTo = (view) => {
+            currentView = view;
+            renderApp();
+        };
+
+        // VISTAS DEL SISTEMA
+
+        const renderLogin = () => `
+            <form id="login-form">
+                <div class="mb-4">
+                    <label for="login-email" class="block text-sm font-medium text-gray-600 mb-1">Correo Electrónico</label>
+                    <input type="email" id="login-email" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
+                </div>
+                <div class="mb-6">
+                    <label for="login-password" class="block text-sm font-medium text-gray-600 mb-1">Contraseña</label>
+                    <input type="password" id="login-password" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors shadow-lg">
+                    Iniciar Sesión
+                </button>
+            </form>
+            <p class="mt-6 text-center text-sm text-gray-500">
+                ¿No tienes cuenta? <button type="button" id="btn-show-register" class="font-medium text-indigo-600 hover:text-indigo-500">Regístrate aquí</button>
+            </p>
+            <div id="login-message" class="mt-4 text-center text-sm"></div>
+        `;
+
+        const renderRegister = () => `
+            <form id="register-form">
+                <p class="text-sm text-orange-600 mb-4">El registro creará una cuenta de Estudiante. Usa un email nuevo para probar.</p>
+                <div class="mb-4">
+                    <label for="register-email" class="block text-sm font-medium text-gray-600 mb-1">Correo Electrónico</label>
+                    <input type="email" id="register-email" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
+                </div>
+                <div class="mb-6">
+                    <label for="register-password" class="block text-sm font-medium text-gray-600 mb-1">Contraseña (Mínimo 6 caracteres)</label>
+                    <input type="password" id="register-password" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" minlength="6" required>
+                </div>
+                <button type="submit" class="w-full bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition-colors shadow-lg">
+                    Registrar Cuenta
+                </button>
+            </form>
+            <p class="mt-6 text-center text-sm text-gray-500">
+                ¿Ya tienes cuenta? <button type="button" id="btn-show-login" class="font-medium text-indigo-600 hover:text-indigo-500">Iniciar Sesión</button>
+            </p>
+            <div id="register-message" class="mt-4 text-center text-sm"></div>
+        `;
+
+        const renderMFA = () => `
+            <div class="p-4 bg-yellow-50 border border-yellow-300 rounded-lg mb-6">
+                <p class="font-bold text-lg text-yellow-800">MFA Requerido</p>
+                <p class="text-sm text-yellow-700">Has iniciado sesión como Administrador. Por favor, introduce el código TOTP de 6 dígitos.</p>
+                <p class="text-xs mt-2 text-yellow-600 italic">Demo: Usar código <span class="font-bold">123456</span></p>
+            </div>
+            <form id="mfa-form">
+                <div class="mb-6">
+                    <label for="mfa-code" class="block text-sm font-medium text-gray-600 mb-1">Código de 6 dígitos</label>
+                    <input type="text" id="mfa-code" class="w-full p-3 text-center text-2xl tracking-widest border-2 border-indigo-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" maxlength="6" pattern="[0-9]{6}" required>
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors shadow-lg">
+                    Verificar Código
+                </button>
+            </form>
+            <div id="mfa-message" class="mt-4 text-center text-sm"></div>
+            <p class="mt-6 text-center text-sm text-gray-500">
+                <button type="button" id="btn-logout-mfa" class="font-medium text-red-600 hover:text-red-500">Cerrar Sesión</button>
+            </p>
+        `;
+
+        const renderPublicVerify = () => `
+            <form id="public-verify-form">
+                <div class="mb-6">
+                    <label for="cert-code" class="block text-sm font-medium text-gray-600 mb-1">Código Único del Certificado</label>
+                    <input type="text" id="cert-code" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" placeholder="Ej: CEB-XXXX-XXX" required>
+                    <p class="text-xs text-gray-500 mt-1 italic">Ingresa el código del certificado que deseas verificar</p>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-lg">
+                    Buscar y Verificar
+                </button>
+            </form>
+            <div id="verify-result" class="mt-6 p-4 border rounded-lg bg-gray-50">
+                <p class="text-gray-500 italic">Aquí aparecerá el resultado de la verificación.</p>
+            </div>
+        `;
+
+        const renderStudentDashboard = () => {
+            const cert = simulateGetPrivateCert(currentUser.uid);
+            let certContent = '';
+
+            if (cert) {
+                certContent = `
+                    <p class="text-lg font-bold text-green-700 mb-2">Certificado Disponible!</p>
+                    <p class="text-sm text-gray-700">Otorgado a: <span class="font-semibold">${currentUser.nombreCompleto}</span></p>
+                    <p class="text-sm text-gray-700">Título: <span class="font-semibold">${cert.titulo}</span></p>
+                    <p class="text-sm text-gray-700">Código Único: <span class="font-mono">${cert.codigo}</span></p>
+                    <p class="text-sm text-gray-700">Fecha de Emisión: ${cert.fechaEmision}</p>
+                    ${cert.fechaActualizacion ? `<p class="text-sm text-gray-700">Última Actualización: ${cert.fechaActualizacion}</p>` : ''}
+                    <p class="text-sm text-gray-700 mt-2">Función: <span class="text-blue-600 font-bold">Descarga de Documento Oficial</span></p>
+                    <button id="btn-download-cert" class="mt-4 w-full bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition-colors shadow-lg"
+                        data-cert-code="${cert.codigo}" data-student-name="${currentUser.nombreCompleto}">
+                        Descargar Certificado
+                    </button>
+                `;
+            } else {
+                certContent = `
+                    <p class="text-lg font-bold text-red-700 mb-2">Certificado No Encontrado</p>
+                    <p class="text-sm text-gray-700">Aún no se ha emitido un certificado principal para tu cuenta. Si crees que es un error, contacta a la administración.</p>
+                `;
+            }
+
+            return `
+                <div class="p-6 bg-indigo-50 rounded-xl">
+                    <p class="text-xl font-bold text-indigo-700 mb-2">Bienvenido(a), Estudiante.</p>
+                    <p class="text-gray-700">Este es tu portal para gestionar tu documentación oficial.</p>
+                    <div class="mt-6 p-4 border rounded-lg bg-white shadow-inner">
+                        ${certContent}
+                    </div>
+                </div>
+                <button id="btn-logout" class="mt-6 w-full bg-red-600 text-white p-3 rounded-lg font-semibold hover:bg-red-700 transition-colors shadow-lg">
+                    Cerrar Sesión
+                </button>
+            `;
+        };
+
+        const renderAdminDashboard = () => {
+            // Generar lista de estudiantes disponibles para asignar certificado
+            const studentOptions = Object.values(localDB.users)
+                .filter(u => u.rol === 'estudiante')
+                .map(u => {
+                    const profile = localDB.profiles[u.uid];
+                    const hasCert = localDB.privateCertificates[u.uid] ? ' (Certificado Emitido)' : '';
+                    return `<option value="${u.uid}">${profile.nombreCompleto || u.email} (${u.email})${hasCert}</option>`;
+                }).join("");
+
+            return `
+                <div class="p-6 bg-purple-50 rounded-xl mb-6">
+                    <p class="text-xl font-bold text-purple-700 mb-2">Panel de Administración</p>
+                    <p class="text-gray-700">Usa este formulario para emitir Certificados de Estudios.</p>
+                </div>
+
+                <form id="generate-cert-form">
+                    <div class="mb-4">
+                        <label for="student-uid" class="block text-sm font-medium text-gray-600 mb-1">Asignar a Estudiante</label>
+                        <select id="student-uid" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500" required>
+                            <option value="">-- Selecciona un Estudiante --</option>
+                            ${studentOptions}
+                        </select>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-600 mb-1">Título del Documento</label>
+                        <input type="text" id="cert-title" class="w-full p-3 border border-gray-300 rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value="Certificado de Estudios - Culminación Satisfactoria" readonly>
+                    </div>
+
+                    <div class="mb-6">
+                        <label for="cert-date" class="block text-sm font-medium text-gray-600 mb-1">Fecha de Emisión</label>
+                        <input type="date" id="cert-date" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500" value="${new Date().toISOString().substring(0, 10)}" required>
+                    </div>
+
+                    <button type="submit" class="w-full bg-purple-600 text-white p-3 rounded-lg font-semibold hover:bg-purple-700 transition-colors shadow-lg">
+                        Emitir y Publicar Certificado
+                    </button>
+                </form>
+
+                <div id="admin-message" class="mt-4 text-center text-sm"></div>
+
+                <div id="admin-download-container" class="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg hidden"></div>
+
+                <!-- NUEVA SECCIÓN: Gestión de Certificados -->
+                <div class="mt-8 p-6 bg-blue-50 rounded-xl">
+                    <h3 class="text-lg font-bold text-blue-700 mb-4">Gestión de Certificados Existentes</h3>
+                    <p class="text-sm text-gray-700 mb-4">Desde aquí puedes actualizar o eliminar certificados ya emitidos.</p>
+                    <button id="btn-manage-certificates" class="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-lg">
+                        Gestionar Certificados
+                    </button>
+                </div>
+
+                <button id="btn-logout-admin" class="mt-6 w-full bg-red-600 text-white p-3 rounded-lg font-semibold hover:bg-red-700 transition-colors shadow-lg">
+                    Cerrar Sesión
+                </button>
+            `;
+        };
+
+        // VISTA: Gestión de Certificados para Administrador
+        const renderAdminCertificateManagement = () => {
+            // Obtener todos los certificados existentes
+            const existingCertificates = Object.entries(localDB.privateCertificates);
+            
+            let certificatesList = '';
+            
+            if (existingCertificates.length === 0) {
+                certificatesList = `
+                    <div class="p-4 border border-yellow-300 rounded-lg bg-yellow-50">
+                        <p class="text-yellow-700">No hay certificados emitidos. Ve al panel principal para crear el primer certificado.</p>
+                    </div>
+                `;
+            } else {
+                certificatesList = existingCertificates.map(([uid, cert]) => {
+                    const profile = localDB.profiles[uid];
+                    const history = simulateGetCertificateHistory(cert.codigo);
+                    const lastUpdate = history.length > 0 ? 
+                        new Date(history[history.length - 1].timestamp).toLocaleString() : 
+                        'Sin modificaciones';
+                    
+                    return `
+                        <div class="p-4 border rounded-lg bg-white shadow-sm mb-4">
+                            <div class="flex justify-between items-start">
+                                <div class="flex-1">
+                                    <h4 class="font-bold text-lg text-gray-800">${profile.nombreCompleto}</h4>
+                                    <p class="text-sm text-gray-600">Código: <span class="font-mono">${cert.codigo}</span></p>
+                                    <p class="text-sm text-gray-600">Título: ${cert.titulo}</p>
+                                    <p class="text-sm text-gray-600">Fecha de Emisión: ${cert.fechaEmision}</p>
+                                    ${cert.fechaActualizacion ? 
+                                        `<p class="text-sm text-gray-600">Última Actualización: ${cert.fechaActualizacion}</p>` : ''}
+                                    <p class="text-sm text-gray-500 mt-1">Última modificación: ${lastUpdate}</p>
+                                </div>
+                                <div class="flex flex-col space-y-2 ml-4">
+                                    <button class="btn-edit-certificate px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm"
+                                        data-uid="${uid}" data-cert-code="${cert.codigo}">
+                                        Editar
+                                    </button>
+                                    <button class="btn-delete-certificate px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-sm"
+                                        data-uid="${uid}" data-cert-code="${cert.codigo}" data-student-name="${profile.nombreCompleto}">
+                                        Eliminar
+                                    </button>
+                                    <button class="btn-view-history px-3 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors text-sm"
+                                        data-cert-code="${cert.codigo}">
+                                        Historial
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            return `
+                <div class="p-6 bg-blue-50 rounded-xl mb-6">
+                    <p class="text-xl font-bold text-blue-700 mb-2">Gestión de Certificados</p>
+                    <p class="text-gray-700">Desde aquí puedes actualizar o eliminar certificados existentes.</p>
+                </div>
+
+                <div class="mb-6">
+                    <h3 class="text-lg font-bold text-gray-700 mb-4">Certificados Emitidos</h3>
+                    ${certificatesList}
+                </div>
+
+                <!-- Formulario de Edición (oculto inicialmente) -->
+                <div id="edit-certificate-form-container" class="mt-6 p-4 border rounded-lg bg-gray-50 hidden">
+                    <h4 class="text-lg font-bold text-gray-700 mb-4">Editar Certificado</h4>
+                    <form id="edit-certificate-form">
+                        <input type="hidden" id="edit-cert-uid">
+                        <input type="hidden" id="edit-cert-original-code">
+                        
+                        <div class="mb-4">
+                            <label for="edit-cert-student" class="block text-sm font-medium text-gray-600 mb-1">Estudiante</label>
+                            <input type="text" id="edit-cert-student" class="w-full p-3 border border-gray-300 rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" readonly>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label for="edit-cert-code" class="block text-sm font-medium text-gray-600 mb-1">Código Único</label>
+                            <input type="text" id="edit-cert-code" class="w-full p-3 border border-gray-300 rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" readonly>
+                        </div>
+                        
+                        <div class="mb-4">
+                            <label for="edit-cert-title" class="block text-sm font-medium text-gray-600 mb-1">Título del Documento</label>
+                            <input type="text" id="edit-cert-title" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" required>
+                        </div>
+                        
+                        <div class="mb-6">
+                            <label for="edit-cert-date" class="block text-sm font-medium text-gray-600 mb-1">Fecha de Emisión</label>
+                            <input type="date" id="edit-cert-date" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" required>
+                        </div>
+                        
+                        <div class="flex space-x-4">
+                            <button type="submit" class="flex-1 bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-lg">
+                                Actualizar Certificado
+                            </button>
+                            <button type="button" id="btn-cancel-edit" class="flex-1 bg-gray-600 text-white p-3 rounded-lg font-semibold hover:bg-gray-700 transition-colors shadow-lg">
+                                Cancelar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div id="certificate-management-message" class="mt-4 text-center text-sm"></div>
+            `;
+        };
+
+        // LÓGICA DE EVENTOS
+
+        const handleLogin = (e) => {
+            e.preventDefault();
+            const email = getEl('login-email').value;
+            const password = getEl('login-password').value;
+            const msgEl = getEl('login-message');
+
+            msgEl.className = 'mt-4 text-center text-sm text-gray-500';
+            msgEl.textContent = 'Iniciando sesión...';
+
+            const user = simulatedLogin(email, password);
+            if (user) {
+                currentUser = user;
+                if (currentUser.rol === 'admin') {
+                    navigateTo('mfa_prompt');
+                } else {
+                    navigateTo('student_dashboard');
+                }
+            } else {
+                msgEl.className = 'mt-4 text-center text-sm text-red-600';
+                msgEl.textContent = 'Credenciales incorrectas. Intenta de nuevo.';
+            }
+        };
+
+        const handleRegister = (e) => {
+            e.preventDefault();
+            const email = getEl('register-email').value;
+            const password = getEl('register-password').value;
+            const msgEl = getEl('register-message');
+
+            try {
+                simulateRegisterStudent(email, password);
+                msgEl.className = 'mt-4 text-center text-sm text-green-600 font-bold';
+                msgEl.textContent = '¡Registro exitoso! Por favor, inicia sesión.';
+                setTimeout(() => navigateTo('login'), 1500);
+            } catch (error) {
+                msgEl.className = 'mt-4 text-center text-sm text-red-600';
+                msgEl.textContent = `Error al registrar: ${error.message}`;
+            }
+        };
+
+        const handleMFA = (e) => {
+            e.preventDefault();
+            const code = getEl('mfa-code').value;
+            const msgEl = getEl('mfa-message');
+
+            msgEl.className = 'mt-4 text-center text-sm text-gray-500';
+            msgEl.textContent = 'Verificando código...';
+
+            if (code === '123456') {
+                msgEl.className = 'mt-4 text-center text-sm text-green-600 font-bold';
+                msgEl.textContent = 'Verificación MFA exitosa!';
+                navigateTo('admin_dashboard');
+            } else {
+                msgEl.className = 'mt-4 text-center text-sm text-red-600';
+                msgEl.textContent = 'Código incorrecto. Intenta de nuevo.';
+            }
+        };
+
+        const handlePublicVerify = (e) => {
+            e.preventDefault();
+            const code = getEl('cert-code').value.trim().toUpperCase();
+            const resultEl = getEl('verify-result');
+
+            resultEl.innerHTML = '<p class="text-gray-500 italic">Buscando certificado...</p>';
+
+            const cert = simulateGetPublicCert(code);
+            if (cert) {
+                resultEl.className = 'mt-6 p-4 border border-green-400 rounded-lg bg-green-50 shadow-md';
+                resultEl.innerHTML = `
+                    <p class="text-lg font-bold text-green-700 mb-2">¡CERTIFICADO VÁLIDO!</p>
+                    <p class="text-sm text-gray-700">Código Único: <span class="font-mono">${code}</span></p>
+                    <p class="text-sm text-gray-700">Otorgado a: <span class="font-semibold">${cert.nombreCompleto}</span></p>
+                    <p class="text-sm text-gray-700">Título: <span class="font-semibold">${cert.titulo}</span></p>
+                    <p class="text-sm text-gray-700">Fecha de Emisión: ${cert.fechaEmision}</p>
+                    ${cert.fechaActualizacion ? `<p class="text-sm text-gray-700">Última Actualización: ${cert.fechaActualizacion}</p>` : ''}
+                    <p class="text-sm text-gray-700">Estado: ${cert.estado || "Válido"}</p>
+                    <button id="btn-public-download" class="mt-4 w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-lg"
+                        data-cert-code="${code}" data-student-name="${cert.nombreCompleto}">
+                        Descargar PDF del Certificado
+                    </button>
+                `;
+            } else {
+                resultEl.className = 'mt-6 p-4 border border-red-400 rounded-lg bg-red-50 shadow-md';
+                resultEl.innerHTML = `
+                    <p class="text-lg font-bold text-red-700 mb-2">CERTIFICADO NO ENCONTRADO</p>
+                    <p class="text-sm text-gray-700">El código <span class="font-mono">${code}</span> no corresponde a un certificado emitido o válido.</p>
+                `;
+            }
+
+            attachEventListeners();
+        };
+
+        const handleGenerateCert = (e) => {
+            e.preventDefault();
+            const uid = getEl('student-uid').value;
+            const title = getEl('cert-title').value;
+            const date = getEl('cert-date').value;
+            const msgEl = getEl('admin-message');
+            const downloadContainer = getEl('admin-download-container');
+
+            downloadContainer.classList.add("hidden");
+
+            if (!uid || !title || !date) {
+                msgEl.className = 'mt-4 text-center text-sm text-red-600';
+                msgEl.textContent = 'Todos los campos son obligatorios.';
+                return;
+            }
+
+            const newCode = generateUniqueCode(uid);
+            const profile = localDB.profiles[uid];
+
+            if (!profile) {
+                msgEl.className = 'mt-4 text-center text-sm text-red-600';
+                msgEl.textContent = 'Error: Perfil de estudiante no encontrado.';
+                return;
+            }
+
+            const newCertData = {
+                titulo: title,
+                codigo: newCode,
+                fechaEmision: date,
+            };
+
+            const publicCertData = {
+                ...newCertData,
+                nombreCompleto: profile.nombreCompleto,
+                estado: "Válido"
+            };
+
+            // Registrar en el historial
+            if (!localDB.certificateHistory[newCode]) {
+                localDB.certificateHistory[newCode] = [];
+            }
+            
+            localDB.certificateHistory[newCode].push({
+                timestamp: new Date().toISOString(),
+                action: 'CREATE',
+                createdData: { ...newCertData },
+                createdBy: currentUser.uid
+            });
+
+            // Guardar en las colecciones
+            localDB.privateCertificates[uid] = newCertData;
+            localDB.publicCertificates[newCode] = publicCertData;
+
+            msgEl.className = 'mt-4 text-center text-sm text-green-600 font-bold';
+            msgEl.textContent = `¡Certificado emitido para ${profile.nombreCompleto}! Código Único: ${newCode}.`;
+
+            // Mostrar el botón de descarga
+            downloadContainer.classList.remove('hidden');
+            downloadContainer.innerHTML = `
+                <p class="text-sm font-semibold text-gray-700 mb-2">Certificado Generado: <span class="font-mono text-green-600">${newCode}</span></p>
+                <button id="btn-admin-download-latest" class="w-full bg-indigo-600 text-white p-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors shadow-lg"
+                    data-cert-code="${newCode}" data-student-name="${profile.nombreCompleto}">
+                    Descargar Copia (Admin)
+                </button>
+            `;
+
+            attachEventListeners();
+        };
+
+        // FUNCIÓN: Manejar la actualización de certificados
+        const handleUpdateCertificate = (e) => {
+            e.preventDefault();
+            const uid = getEl('edit-cert-uid').value;
+            const originalCode = getEl('edit-cert-original-code').value;
+            const title = getEl('edit-cert-title').value;
+            const date = getEl('edit-cert-date').value;
+            const msgEl = getEl('certificate-management-message');
+
+            if (!uid || !title || !date) {
+                msgEl.className = 'mt-4 text-center text-sm text-red-600';
+                msgEl.textContent = 'Todos los campos son obligatorios.';
+                return;
+            }
+
+            try {
+                const updatedCert = simulateUpdateCertificate(uid, {
+                    titulo: title,
+                    fechaEmision: date
+                });
+
+                msgEl.className = 'mt-4 text-center text-sm text-green-600 font-bold';
+                msgEl.textContent = `¡Certificado actualizado exitosamente! Código: ${updatedCert.codigo}`;
+
+                // Ocultar el formulario de edición
+                getEl('edit-certificate-form-container').classList.add('hidden');
+                
+                // Volver a renderizar la vista de gestión
+                setTimeout(() => {
+                    navigateTo('admin_certificate_management');
+                }, 1500);
+
+            } catch (error) {
+                msgEl.className = 'mt-4 text-center text-sm text-red-600';
+                msgEl.textContent = `Error al actualizar certificado: ${error.message}`;
+            }
+        };
+
+        // FUNCIÓN: Manejar la eliminación de certificados
+        const handleDeleteCertificate = (uid, code, studentName) => {
+            showConfirmationModal(
+                "Confirmar Eliminación",
+                `¿Estás seguro de que deseas eliminar el certificado de ${studentName} (Código: ${code})? Esta acción no se puede deshacer.`,
+                () => {
+                    try {
+                        const result = simulateDeleteCertificate(uid);
+                        showMessage(
+                            "Eliminación Exitosa",
+                            `El certificado de ${studentName} (Código: ${result.deletedCode}) ha sido eliminado correctamente.`,
+                            'success'
+                        );
+                        
+                        // Volver a renderizar la vista de gestión
+                        setTimeout(() => {
+                            navigateTo('admin_certificate_management');
+                        }, 1500);
+                    } catch (error) {
+                        showMessage(
+                            "Error en Eliminación",
+                            `No se pudo eliminar el certificado: ${error.message}`,
+                            'error'
+                        );
+                    }
+                }
+            );
+        };
+
+        // FUNCIÓN: Mostrar formulario de edición
+        const showEditCertificateForm = (uid, code) => {
+            const cert = localDB.privateCertificates[uid];
+            const profile = localDB.profiles[uid];
+            
+            if (!cert || !profile) {
+                showMessage("Error", "No se pudo cargar la información del certificado para editar.", "error");
+                return;
+            }
+
+            // Llenar el formulario con los datos actuales
+            getEl('edit-cert-uid').value = uid;
+            getEl('edit-cert-original-code').value = code;
+            getEl('edit-cert-student').value = profile.nombreCompleto;
+            getEl('edit-cert-code').value = code;
+            getEl('edit-cert-title').value = cert.titulo;
+            getEl('edit-cert-date').value = cert.fechaEmision;
+
+            // Mostrar el formulario
+            getEl('edit-certificate-form-container').classList.remove('hidden');
+            
+            // Desplazar hacia el formulario
+            getEl('edit-certificate-form-container').scrollIntoView({ behavior: 'smooth' });
+        };
+
+        // FUNCIÓN: Mostrar historial de certificado
+        const showCertificateHistory = (code) => {
+            const history = simulateGetCertificateHistory(code);
+            const cert = localDB.publicCertificates[code];
+            
+            if (!cert) {
+                showMessage("Error", "No se encontró información del certificado.", "error");
+                return;
+            }
+
+            let historyContent = '';
+            
+            if (history.length === 0) {
+                historyContent = '<p class="text-gray-500 italic">No hay historial de modificaciones para este certificado.</p>';
+            } else {
+                historyContent = history.map(entry => {
+                    const actionText = entry.action === 'CREATE' ? 'Creación' : 
+                                      entry.action === 'UPDATE' ? 'Actualización' : 'Eliminación';
+                    const date = new Date(entry.timestamp).toLocaleString();
+                    
+                    return `
+                        <div class="p-3 border-b border-gray-200">
+                            <p class="font-semibold">${actionText} - ${date}</p>
+                            <p class="text-sm text-gray-600">Realizado por: ${localDB.profiles[entry.updatedBy || entry.createdBy || entry.deletedBy]?.nombreCompleto || 'Sistema'}</p>
+                            ${entry.previousData ? `<p class="text-xs text-gray-500 mt-1">Datos anteriores: ${JSON.stringify(entry.previousData)}</p>` : ''}
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            showMessage(
+                `Historial del Certificado ${code}`,
+                `<div class="max-h-60 overflow-y-auto">
+                    <p class="mb-2"><strong>Estudiante:</strong> ${cert.nombreCompleto}</p>
+                    <p class="mb-4"><strong>Título:</strong> ${cert.titulo}</p>
+                    <h4 class="font-bold mb-2">Registro de Modificaciones:</h4>
+                    ${historyContent}
+                </div>`,
+                'info'
+            );
+        };
+
+        const handleDownloadCert = (e) => {
+            const code = e.currentTarget.dataset.certCode;
+            const studentName = e.currentTarget.dataset.studentName;
+            const certData = simulateGetPublicCert(code);
+
+            if (certData && studentName) {
+                simulateDownloadCert(certData, studentName);
+            } else {
+                showMessage(
+                    "ERROR DE DESCARGA",
+                    'No se pudo encontrar la información completa del certificado para la descarga.',
+                    'error'
+                );
+            }
+        };
+
+        const handleLogout = () => {
+            currentUser = null;
+            navigateTo('login');
+        };
+
+        // MANEJO DE EVENT LISTENERS
+        const attachEventListeners = () => {
+            // Limpiar listeners antiguos
+            document.querySelectorAll("#btn-download-cert, #btn-public-download, #btn-admin-download-latest").forEach(btn => {
+                btn.onclick = null;
+            });
+
+            // Navegación principal
+            const btnPublicVerify = getEl('btn-public-verify');
+            if (btnPublicVerify) btnPublicVerify.onclick = () => navigateTo('public_verify');
+
+            const btnBackLogin = getEl('btn-back-login');
+            if (btnBackLogin) btnBackLogin.onclick = () => navigateTo('login');
+
+            const btnBackAdmin = getEl('btn-back-admin');
+            if (btnBackAdmin) btnBackAdmin.onclick = () => navigateTo('admin_dashboard');
+
+            // Eventos de Login/Registro/MFA
+            const loginForm = getEl('login-form');
+            if (loginForm) loginForm.onsubmit = handleLogin;
+
+            const btnShowRegister = getEl('btn-show-register');
+            if (btnShowRegister) btnShowRegister.onclick = () => navigateTo('register');
+
+            const registerForm = getEl('register-form');
+            if (registerForm) registerForm.onsubmit = handleRegister;
+
+            const btnShowLogin = getEl('btn-show-login');
+            if (btnShowLogin) btnShowLogin.onclick = () => navigateTo('login');
+
+            const mfaForm = getEl('mfa-form');
+            if (mfaForm) mfaForm.onsubmit = handleMFA;
+
+            const btnLogoutMFA = getEl('btn-logout-mfa');
+            if (btnLogoutMFA) btnLogoutMFA.onclick = handleLogout;
+
+            // Eventos de Verificación Pública
+            const publicVerifyForm = getEl('public-verify-form');
+            if (publicVerifyForm) publicVerifyForm.onsubmit = handlePublicVerify;
+
+            // Eventos de Descarga (Estudiante)
+            const btnDownloadCert = getEl('btn-download-cert');
+            if (btnDownloadCert) btnDownloadCert.onclick = handleDownloadCert;
+
+            // Eventos de Descarga (Verificación Pública)
+            const btnPublicDownload = getEl('btn-public-download');
+            if (btnPublicDownload) btnPublicDownload.onclick = handleDownloadCert;
+
+            // Eventos del Panel de Administrador
+            const generateCertForm = getEl('generate-cert-form');
+            if (generateCertForm) generateCertForm.onsubmit = handleGenerateCert;
+
+            // Eventos de Descarga (Admin, certificado recién emitido)
+            const btnAdminDownloadLatest = getEl('btn-admin-download-latest');
+            if (btnAdminDownloadLatest) btnAdminDownloadLatest.onclick = handleDownloadCert;
+
+            // NUEVOS EVENTOS: Gestión de Certificados
+            const btnManageCertificates = getEl('btn-manage-certificates');
+            if (btnManageCertificates) btnManageCertificates.onclick = () => navigateTo('admin_certificate_management');
+
+            // Eventos para botones de edición, eliminación e historial
+            document.querySelectorAll('.btn-edit-certificate').forEach(btn => {
+                btn.onclick = (e) => {
+                    const uid = e.currentTarget.dataset.uid;
+                    const code = e.currentTarget.dataset.certCode;
+                    showEditCertificateForm(uid, code);
+                };
+            });
+
+            document.querySelectorAll('.btn-delete-certificate').forEach(btn => {
+                btn.onclick = (e) => {
+                    const uid = e.currentTarget.dataset.uid;
+                    const code = e.currentTarget.dataset.certCode;
+                    const studentName = e.currentTarget.dataset.studentName;
+                    handleDeleteCertificate(uid, code, studentName);
+                };
+            });
+
+            document.querySelectorAll('.btn-view-history').forEach(btn => {
+                btn.onclick = (e) => {
+                    const code = e.currentTarget.dataset.certCode;
+                    showCertificateHistory(code);
+                };
+            });
+
+            // Eventos del formulario de edición
+            const editCertificateForm = getEl('edit-certificate-form');
+            if (editCertificateForm) editCertificateForm.onsubmit = handleUpdateCertificate;
+
+            const btnCancelEdit = getEl('btn-cancel-edit');
+            if (btnCancelEdit) btnCancelEdit.onclick = () => {
+                getEl('edit-certificate-form-container').classList.add('hidden');
+            };
+
+            // Eventos de Logout (Administrador y Estudiante)
+            const btnLogout = getEl('btn-logout');
+            if (btnLogout) btnLogout.onclick = handleLogout;
+
+            // Eventos de Logout (Admin específico)
+            const btnLogoutAdmin = getEl('btn-logout-admin');
+            if (btnLogoutAdmin) btnLogoutAdmin.onclick = handleLogout;
+        };
+
+        // Inicialización
+        window.onload = renderApp;
+    </script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #e5e7eb;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        #modal-message {
+            white-space: pre-line;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <!-- Custom Modal for Alerts/Messages -->
+    <div id="custom-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50 hidden">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-md m-4 transform transition-all">
+            <h3 id="modal-title" class="text-xl font-bold mb-3 text-gray-900"></h3>
+            <p id="modal-message" class="text-gray-700 mb-6"></p>
+            <button id="modal-close-btn" class="w-full bg-indigo-600 text-white p-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors shadow-md">
+                Aceptar  
+            </button>  
+        </div>  
+    </div>
+
+    <!-- Modal de Confirmación (NUEVO) -->
+    <div id="confirmation-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50 hidden">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-md m-4 transform transition-all">
+            <h3 id="confirmation-title" class="text-xl font-bold mb-3 text-gray-900"></h3>
+            <p id="confirmation-message" class="text-gray-700 mb-6"></p>
+            <div class="flex space-x-4">
+                <button id="confirmation-cancel-btn" class="flex-1 bg-gray-600 text-white p-3 rounded-lg font-semibold hover:bg-gray-700 transition-colors shadow-md">
+                    Cancelar
+                </button>
+                <button id="confirmation-confirm-btn" class="flex-1 bg-red-600 text-white p-3 rounded-lg font-semibold hover:bg-red-700 transition-colors shadow-md">
+                    Confirmar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Contenedor principal de la aplicación -->  
+    <div id="app-container" class="flex flex-col items-center">
+        <p class="text-xl text-indigo-600 font-bold">Cargando aplicación...</p>  
+    </div>  
+</body>  
+</html>

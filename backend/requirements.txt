@@ -1,0 +1,25 @@
+# Framework Web
+Flask==3.0.0
+Flask-CORS==4.0.0
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+Flask-Mail
+
+# Base de datos (SIN versión fija para evitar problemas de compilación)
+psycopg2-binary
+
+# Seguridad
+bcrypt==4.1.2
+PyJWT==2.8.0
+pyotp==2.9.0
+
+# Generación de QR y PDFs
+qrcode[pil]==7.4.2
+Pillow
+reportlab==4.0.7
+
+# Variables de entorno
+python-dotenv==1.0.0
+
+# Validación
+email-validator>=2.1.1
