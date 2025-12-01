@@ -1,5 +1,5 @@
 ## Usuarios y contraseñas del sistema (modo TEST)
-## No contienen información real y son únicamente para fines de test.
+## No contiene información real y son únicamente para fines de test.
 ### Administrador
 ```
 user: admin@cebrena.edu.pe
